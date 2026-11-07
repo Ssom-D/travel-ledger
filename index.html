@@ -529,7 +529,7 @@ function openSheet(title,body,{submitLabel='저장',onSubmit,extra=''}={}){
   const root=document.getElementById('sheetRoot');
   root.innerHTML=`<div class="overlay" data-close="1"><form class="sheet" id="sheetForm" novalidate><header><h2>${esc(title)}</h2><button type="button" class="iconbtn" data-close="1">${I.x}</button></header><div class="body">${body}</div><footer>${extra}<button class="btn primary" type="submit">${esc(submitLabel)}</button></footer></form></div>`;
   const form=document.getElementById('sheetForm');
-  form.addEventListener('submit',ev=>{ev.preventDefault(); if(onSubmit&&onSubmit(form)!==false){closeSheet()}});
+  form.addEventListener('submit',ev=>{ev.preventDefault(); if(!onSubmit||onSubmit(form)!==false){closeSheet()}});
   root.querySelectorAll('[data-close]').forEach(el=>el.addEventListener('click',ev=>{ if(el.classList.contains('overlay')&&ev.target!==el)return; closeSheet() }));
   return form;
 }
