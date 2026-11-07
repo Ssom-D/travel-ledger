@@ -217,6 +217,15 @@ input::-webkit-date-and-time-value{text-align:left}
 .walletcard .bal{font-family:var(--mono);font-size:24px;font-weight:600}
 .walletcard .rate{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:2px}
 .walletcard .acts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.walletcard .wopen{display:block;width:100%;text-align:left;border-radius:10px;margin:-6px -8px;padding:6px 8px;width:calc(100% + 16px)}
+.walletcard .wopen:active{background:var(--surface2)}
+.wrow{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:9px 0;border-bottom:1px solid var(--line);width:100%;text-align:left}
+.wrow:last-child{border-bottom:0}
+.wrow .l{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wrow .m{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.wrow .a{font-family:var(--mono);font-weight:600;text-align:right;white-space:nowrap}
+.wrow .a.plus{color:var(--pos)}
+.wrow .b{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;white-space:nowrap}
 
 /* settle */
 .settlecard{margin:14px 16px 0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
@@ -439,7 +448,13 @@ function viewTrip(t){
 function viewLedger(t){
   const td=today(); const todaySum=t.expenses.filter(e=>e.date===td).reduce((s,e)=>s+eKRW(e),0);
   const wallets=(t.currencies||[]).filter(c=>c.code!=='KRW').map(c=>`<div class="wallet">${esc(c.code)} 현금 <b>${fmt(walletBalance(t,c.code),c.code)}</b></div>`).join('')+cardWallets(t).filter(w=>cardWalletBalance(t,w.key,w.cur)!==0).map(w=>`<div class="wallet cardw">${esc(acctLabel(w.key))} ${esc(w.cur)} <b>${fmt(cardWalletBalance(t,w.key,w.cur),w.cur)}</b></div>`).join('');
-  const byDay={}; for(const e of t.expenses){(byDay[e.date]=byDay[e.date]||[]).push(e)}
+  // 결제수단 필터: 전체 / 현금 / 카드 / 카드별
+  const flt=V.filter||'all'; const usedCards=[...new Set(t.expenses.filter(e=>e.pm&&e.pm.type==='card').map(e=>e.pm.id))].filter(id=>S.settings.cards.some(c=>c.id===id));
+  const match=e=>flt==='all'?true:flt==='cash'?(e.pm&&e.pm.type==='cash'):flt==='card'?(e.pm&&e.pm.type==='card'):(e.pm&&e.pm.type==='card'&&e.pm.id===flt);
+  const shown=t.expenses.filter(match); const shownSum=shown.reduce((s,e)=>s+eKRW(e),0);
+  const chips=[['all','전체'],['cash','현금'],['card','카드'],...usedCards.map(id=>[id,cardName(id)])].map(([k,l])=>`<button class="chip ${flt===k?'active':''} ${k==='cash'?'cash':k==='all'?'':'card'}" data-act="filter" data-filter="${esc(k)}">${esc(l)}</button>`).join('');
+  const filterBar=t.expenses.length?`<div class="chips" style="padding:12px 16px 0">${chips}</div>${flt!=='all'?`<div class="small muted" style="padding:6px 16px 0">${esc(flt==='cash'?'현금':flt==='card'?'카드':cardName(flt))} ${shown.length}건 · ${fmtKRW(shownSum)}</div>`:''}`:'';
+  const byDay={}; for(const e of shown){(byDay[e.date]=byDay[e.date]||[]).push(e)}
   const days=Object.keys(byDay).sort().reverse();
   const groups=days.map(d=>{const list=byDay[d].sort((a,b)=>(b.time||'').localeCompare(a.time||'')); const sum=list.reduce((s,e)=>s+eKRW(e),0);
     return `<div class="daygroup"><div class="dayhead"><span class="d">${fmtDate(d)}</span><span class="t">${fmtKRW(sum)}</span></div>${list.map(e=>rowExpense(t,e)).join('')}</div>`}).join('');
@@ -447,7 +462,8 @@ function viewLedger(t){
   <div class="wallets">${wallets}</div>
   ${noRateCount(t)?`<div class="notice">${noRateCount(t)}건은 환율이 없어서 원화 합계에 아직 안 들어가요. 현금 탭에서 환전을 적으면 자동으로 채워지고, 그 건을 눌러 직접 넣어도 돼요.</div>`:''}
   ${provisionalCount(t)?`<div class="notice">${provisionalCount(t)}건은 환전 환율로 임시 계산 중이에요. 명세서가 나오면 그 건을 눌러 환율을 넣어 주세요.</div>`:''}
-  ${groups||`<div class="empty"><b>첫 지출을 기록해 보세요</b>오른쪽 아래 + 버튼을 누르면 돼요.<br>마지막에 쓴 통화·카드·멤버가 기본값으로 남아요.</div>`}`;
+  ${filterBar}
+  ${groups||(t.expenses.length?`<div class="empty">이 조건에 맞는 지출이 없어요</div>`:`<div class="empty"><b>첫 지출을 기록해 보세요</b>오른쪽 아래 + 버튼을 누르면 돼요.<br>마지막에 쓴 통화·카드·멤버가 기본값으로 남아요.</div>`)}`;
 }
 function rowExpense(t,e){
   const pm=e.pm||{}; const split=e.split||[]; const who=e.payer===meId(t)&&split.length===1&&split[0]===meId(t)?'나만':`${memberName(t,e.payer)} 결제 · ${split.length}명`;
@@ -458,15 +474,15 @@ function rowExpense(t,e){
 function viewCash(t){
   const curs=(t.currencies||[]).map(c=>c.code).filter(c=>c!=='KRW');
   const cards=curs.map(cur=>{const b=walletBalance(t,cur); const r=walletAvgRate(t,cur); const others=S.trips.filter(x=>x.id!==t.id&&(x.currencies||[]).some(c=>c.code===cur));
-    return `<div class="walletcard"><div class="top"><span class="cur">${esc(cur)} 현금 지갑</span><span class="bal">${fmt(b,cur)}</span></div>
-    <div class="rate">${cur==='KRW'?'':walletAvgRateRaw(t,cur)>0?'잔액 환율 '+fmtRate(cur,r)+' · 원화로 약 '+fmtKRW(b*r):r>0?'지출 때 적은 환율 '+fmtRate(cur,r)+' · 환전을 적으면 그 환율로 바뀌어요':'환전을 적으면 환율이 잡혀요'}</div>
+    return `<div class="walletcard"><button class="wopen" data-act="wallet-detail" data-kind="cash" data-cur="${esc(cur)}"><div class="top"><span class="cur">${esc(cur)} 현금 지갑</span><span class="bal">${fmt(b,cur)}</span></div>
+    <div class="rate">${cur==='KRW'?'':walletAvgRateRaw(t,cur)>0?'잔액 환율 '+fmtRate(cur,r)+' · 원화로 약 '+fmtKRW(b*r):r>0?'지출 때 적은 환율 '+fmtRate(cur,r)+' · 환전을 적으면 그 환율로 바뀌어요':'환전을 적으면 환율이 잡혀요'}</div></button>
     <div class="acts"><button class="btn sm" data-act="new-cash" data-cur="${cur}" data-type="exchange">환전</button><button class="btn sm" data-act="new-cash" data-cur="${cur}" data-type="atm">ATM</button><button class="btn sm" data-act="new-cash" data-cur="${cur}" data-type="adjust">잔액 맞추기</button>${others.length&&b>0?`<button class="btn sm ghost" data-act="carry" data-cur="${cur}">다른 여행으로 이월</button>`:''}</div></div>`}).join('');
   const items=[...t.cash].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||b.id.localeCompare(a.id));
   const byDay={}; for(const c of items){(byDay[c.date]=byDay[c.date]||[]).push(c)}
   const groups=Object.keys(byDay).sort().reverse().map(d=>`<div class="daygroup"><div class="dayhead"><span class="d">${fmtDate(d)}</span></div>${byDay[d].map(c=>rowCash(t,c)).join('')}</div>`).join('');
   const cw=cardWallets(t).map(w=>{const b=cardWalletBalance(t,w.key,w.cur); const r=cardAvgRate(t,w.key,w.cur);
-    return `<div class="walletcard cardw"><div class="top"><span class="cur">${esc(acctLabel(w.key))} · ${esc(w.cur)}</span><span class="bal">${fmt(b,w.cur)}</span></div>
-    <div class="rate">${r>0?'잔액 환율 '+fmtRate(w.cur,r)+' · 원화로 약 '+fmtKRW(b*r):'충전을 적으면 환율이 잡혀요'}</div>
+    return `<div class="walletcard cardw"><button class="wopen" data-act="wallet-detail" data-kind="card" data-key="${esc(w.key)}" data-cur="${esc(w.cur)}"><div class="top"><span class="cur">${esc(acctLabel(w.key))} · ${esc(w.cur)}</span><span class="bal">${fmt(b,w.cur)}</span></div>
+    <div class="rate">${r>0?'잔액 환율 '+fmtRate(w.cur,r)+' · 원화로 약 '+fmtKRW(b*r):'충전을 적으면 환율이 잡혀요'}</div></button>
     <div class="acts"><button class="btn sm" data-act="new-cash" data-cur="${w.cur}" data-type="topup" data-acct="${esc(w.key)}">충전</button><button class="btn sm" data-act="new-cash" data-cur="${w.cur}" data-type="refund" data-acct="${esc(w.key)}">환급</button></div></div>`}).join('');
   return `<div class="eyebrow" style="margin:16px 16px 0">실물 현금</div>
   ${cards||'<div class="empty"><b>통화가 없어요</b>여행 설정에서 사용할 통화를 추가해 주세요.</div>'}
@@ -648,6 +664,26 @@ function cashForm(t,c,preset={}){
   renderDyn();
 }
 
+/* ---------- 지갑 상세 ---------- */
+function walletDetail(t,kind,key,cur){
+  const isCard=kind==='card'; const title=isCard?`${acctLabel(key)} · ${cur}`:`${cur} 현금 지갑`;
+  const ev=[];
+  for(const c of t.cash){ if(c.cur!==cur)continue;
+    if(isCard){ if(c.wallet==='card'&&txAcct(c)===key){ ev.push({d:c.date,o:0,amt:c.type==='refund'?-Math.abs(+c.amount||0):Math.abs(+c.amount||0),label:CASH_TYPES[c.type]+(c.memo?' · '+c.memo:''),sub:+c.krw>0?fmtKRW(c.krw)+' · '+fmtRate(cur,(+c.krw)/Math.abs(+c.amount||1)):'',act:'edit-cash',id:c.id}) }
+      else if(c.type==='atm'&&c.cardId&&acctKey(c.cardId)===key&&+c.fromCard>0) ev.push({d:c.date,o:1,amt:-(+c.fromCard),label:'ATM 인출 → 실물 현금'+(c.memo?' · '+c.memo:''),sub:cardName(c.cardId),act:'edit-cash',id:c.id}) }
+    else { if(c.wallet==='card')continue; const a=signedCash(c); if(!a)continue; const sub=(c.type==='exchange'||c.type==='atm')&&+c.krw>0?fmtKRW(c.krw)+' · '+fmtRate(cur,(+c.krw)/Math.abs(+c.amount||1)):c.memberId?memberName(t,c.memberId):(c.type==='atm'&&c.cardId?cardName(c.cardId):''); ev.push({d:c.date,o:a>0?0:1,amt:a,label:CASH_TYPES[c.type]+(c.memo?' · '+c.memo:''),sub,act:'edit-cash',id:c.id}) } }
+  for(const e of t.expenses){ if(e.cur!==cur||!e.pm)continue; const hit=isCard?(e.pm.type==='card'&&acctKey(e.pm.id)===key):(e.pm.type==='cash'&&e.pm.id===cur); if(!hit)continue;
+    ev.push({d:e.date,o:2,tm:e.time||'',amt:-(+e.amount||0),label:e.memo||catName(t,e.cat),sub:(isCard?cardName(e.pm.id)+' · ':'')+(+e.rate>0?fmtKRW(eKRW(e)):'환율 미정'),act:'edit-expense',id:e.id}) }
+  ev.sort((a,b)=>(a.d||'').localeCompare(b.d||'')||a.o-b.o||(a.tm||'').localeCompare(b.tm||''));
+  let bal=0; for(const x of ev){ bal+=x.amt; x.bal=bal }
+  const inSum=ev.filter(x=>x.amt>0).reduce((s,x)=>s+x.amt,0), outSum=ev.filter(x=>x.amt<0).reduce((s,x)=>s-x.amt,0);
+  const r=isCard?cardAvgRate(t,key,cur):walletAvgRate(t,cur);
+  const body=`<div class="summary" style="margin:0"><div><div class="k">현재 잔액</div><div class="v">${fmt(bal,cur)}</div></div><div><div class="k">들어온 돈</div><div class="v">${fmt(inSum,cur)}</div></div><div><div class="k">나간 돈</div><div class="v">${fmt(outSum,cur)}</div></div></div>
+  <div class="small muted">${r>0?(isCard?'잔액 환율 ':'잔액 환율 ')+fmtRate(cur,r)+' · 현재 잔액은 원화로 약 '+fmtKRW(bal*r):'환율 기록이 아직 없어요'} · 줄을 누르면 그 기록을 고칠 수 있어요</div>
+  <div>${ev.length?ev.slice().reverse().map(x=>`<button type="button" class="wrow" data-act="${x.act}" data-id="${x.id}"><span class="l">${esc(x.label)}</span><span class="a ${x.amt>0?'plus':''}">${x.amt>0?'+':'−'}${fmt(Math.abs(x.amt),cur)}</span><span class="m">${fmtDate(x.d)}${x.tm?' '+esc(x.tm):''}${x.sub?' · '+esc(x.sub):''}</span><span class="b">잔액 ${fmt(x.bal,cur)}</span></button>`).join(''):'<div class="empty">아직 기록이 없어요</div>'}</div>`;
+  openSheet(title,body,{submitLabel:'닫기'});
+}
+
 /* ---------- 이월 ---------- */
 function carryForm(t,cur){
   const bal=walletBalance(t,cur); const rate=walletAvgRate(t,cur);
@@ -765,9 +801,10 @@ function backupSheet(){
 
 /* ====================== 액션 ====================== */
 const ACTIONS={
-  'open-trip':d=>{V={screen:'trip',tripId:d.id,tab:'ledger'};render()},
+  'open-trip':d=>{V={screen:'trip',tripId:d.id,tab:'ledger',filter:'all'};render()},
   'go-trips':()=>{V={screen:'trips',tripId:null,tab:'ledger'};render()},
   'tab':d=>{V.tab=d.tab;render()},
+  'filter':d=>{V.filter=d.filter;render()},
   'new-trip':()=>tripForm(),
   'edit-trip':()=>tripForm(getTrip(V.tripId)),
   'settings':()=>settingsSheet(),
@@ -777,6 +814,7 @@ const ACTIONS={
   'new-cash':d=>cashForm(getTrip(V.tripId),null,{cur:d.cur,type:d.type,acct:d.acct}),
   'edit-cash':d=>{const t=getTrip(V.tripId);cashForm(t,t.cash.find(c=>c.id===d.id))},
   'carry':d=>carryForm(getTrip(V.tripId),d.cur),
+  'wallet-detail':d=>walletDetail(getTrip(V.tripId),d.kind,d.key,d.cur),
   'copy-settle':async()=>{const text=settleText(getTrip(V.tripId)); try{await navigator.clipboard.writeText(text);toast('정산 내용을 복사했어요')}catch(e){ openSheet('정산 내용',`<textarea class="input mono small" rows="10" readonly>${esc(text)}</textarea><div class="small muted">길게 눌러 복사해 주세요</div>`,{submitLabel:'닫기'}) }},
   'delete-expense':(d,el)=>armed(el,()=>{const t=getTrip(V.tripId);t.expenses=t.expenses.filter(e=>e.id!==d.id);save();closeSheet();render();toast('지웠어요')}),
   'delete-cash':(d,el)=>armed(el,()=>{const t=getTrip(V.tripId);t.cash=t.cash.filter(c=>c.id!==d.id);refreshProvisional(t);save();closeSheet();render();toast('지웠어요')}),
