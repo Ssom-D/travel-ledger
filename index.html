@@ -321,29 +321,8 @@ function uid(){return Math.random().toString(36).slice(2,8)+Date.now().toString(
 const today=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 
 function seed(){
-  const c1={id:'c_tw',name:'트래블월렛',kind:'debit'}, c2={id:'c_hana',name:'하나 비바X',kind:'credit'}, c3={id:'c_hana_chk',name:'하나 트래블로그',kind:'debit',account:'하나은행'};
-  const cats=[{id:'cat0',name:'식비',subs:[{id:'s_meal',name:'식사'},{id:'s_snack',name:'간식'},{id:'s_cafe',name:'카페'}]},{id:'cat2',name:'교통',subs:[]},{id:'cat3',name:'숙박',subs:[]},{id:'cat4',name:'쇼핑',subs:[{id:'s_mart',name:'마트'},{id:'s_fashion',name:'패션'},{id:'s_gift',name:'기념품'}]},{id:'cat5',name:'관광',subs:[]},{id:'cat6',name:'기타',subs:[]}];
-  const trip={id:'t_sample',name:'나트랑',start:'2026-05-02',end:'2026-05-06',isSample:true,
-    currencies:[{code:'VND',rate:0},{code:'USD',rate:1385}],members:[{id:'me',name:'나',isMe:true},{id:'m_jisu',name:'지수'}],categories:cats,
-    cash:[
-      {id:uid(),date:'2026-05-01',type:'exchange',cur:'VND',amount:3500000,krw:203000,memo:'명동 환전소'},
-      {id:uid(),date:'2026-05-02',type:'init',cur:'USD',amount:100,krw:0,memo:'집에 있던 달러'},
-      {id:uid(),date:'2026-05-01',type:'topup',wallet:'card',cardId:'c_tw',cur:'VND',amount:5000000,krw:293000,memo:'앱에서 환전'},
-      {id:uid(),date:'2026-05-04',type:'atm',cur:'VND',amount:2000000,fromCard:2000000,krw:117200,cardId:'c_tw',memo:'TPBank ATM, 수수료 없음'},
-    ],
-    expenses:[
-      sub(ex('2026-05-02','14:10',450000,'VND',0.058,'cat0','공항 반미',{type:'cash',id:'VND'},'me',['me','m_jisu']),'s_meal'),
-      ex('2026-05-02','15:30',380000,'VND',0.058,'cat2','그랩 공항→호텔',{type:'card',id:'c_tw'},'me',['me','m_jisu']),
-      sub(ex('2026-05-03','09:05',120000,'VND',0.058,'cat0','콩카페',{type:'cash',id:'VND'},'m_jisu',['me','m_jisu']),'s_cafe'),
-      Object.assign(ex('2026-05-03','12:40',860000,'VND',0.058,'cat0','랑응온 점심',{type:'card',id:'c_hana'},'me',['me','m_jisu']),{provisional:true,sub:'s_meal'}),
-      ex('2026-05-03','18:00',45,'USD',1385,'cat5','빈원더스 입장권',{type:'cash',id:'USD'},'me',['me','m_jisu']),
-      ex('2026-05-04','11:20',1250000,'VND',0.058,'cat5','마사지 2인',{type:'cash',id:'VND'},'me',['me','m_jisu']),
-      sub(ex('2026-05-04','20:15',310000,'VND',0.058,'cat0','야시장 간식',{type:'cash',id:'VND'},'m_jisu',['m_jisu']),'s_snack'),
-      ex('2026-05-05','10:00',2400000,'VND',0.058,'cat3','호텔 추가 1박',{type:'card',id:'c_tw'},'me',['me','m_jisu']),
-    ]};
-  return {version:2,settings:{cards:[c1,c2,c3]},trips:[trip]};
-  function ex(date,time,amount,cur,rate,cat,memo,pm,payer,split){return {id:uid(),date,time,amount,cur,rate,cat,sub:null,memo,pm,payer,split,splitMode:'equal',shares:{}}}
-  function sub(e,s){e.sub=s;return e}
+  // 처음 열면 아무것도 없는 상태. 카드는 설정에서, 카테고리는 첫 여행을 만들 때 기본 분류가 들어간다
+  return {version:2,settings:{cards:[]},trips:[]};
 }
 
 /* ====================== 유틸 ====================== */
