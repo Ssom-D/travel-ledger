@@ -298,9 +298,10 @@ const I={
 };
 
 /* ====================== 상태 ====================== */
-let S=load()||seed();
+let LOAD_ERROR=null, RAW_BACKUP='';
+let S=load(); if(!S){ if(LOAD_ERROR){ S={version:2,settings:{cards:[]},trips:[],_broken:true} } else S=seed() }
 let V=loadView();
-function load(){try{const r=localStorage.getItem(KEY);if(!r)return null;const d=JSON.parse(r);migrate(d);return d}catch(e){return null}}
+function load(){ let r=null; try{ r=localStorage.getItem(KEY) }catch(e){ LOAD_ERROR='저장소를 열 수 없어요: '+e.message; return null } if(!r)return null; RAW_BACKUP=r; try{ const d=JSON.parse(r); migrate(d); if(!d||!Array.isArray(d.trips))throw new Error('형식이 맞지 않아요'); return d }catch(e){ LOAD_ERROR='저장된 기록을 읽지 못했어요: '+e.message; try{ localStorage.setItem(KEY+'.broken.'+Date.now(), r) }catch(e2){} return null } }
 function defaultCats(){ const mk=(n,subs=[])=>({id:uid(),name:n,subs:subs.map(x=>({id:uid(),name:x}))}); return [mk('식비',['식사','간식','카페']),mk('교통'),mk('숙박'),mk('쇼핑',['마트','패션','기념품']),mk('관광'),mk('기타')] }
 const subName=(t,catId,subId)=>{const c=(t.categories||[]).find(x=>x.id===catId); return c&&(c.subs||[]).find(x=>x.id===subId)?.name||''};
 function migrate(d){
@@ -313,7 +314,7 @@ function migrate(d){
     delete d.settings.members; delete d.settings.categories; d.version=2 }
   for(const c of d.settings.cards||[]) if(!c.kind)c.kind='debit';
   return d }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('저장하지 못했어요. 저장 공간을 확인해 주세요')}}
+function save(){ if(S&&S._broken){ toast('기록을 읽지 못한 상태라 저장하지 않아요'); return } try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('저장하지 못했어요. 저장 공간을 확인해 주세요')}}
 function loadView(){try{return JSON.parse(localStorage.getItem(KEY+'.view'))||{screen:'trips',tripId:null,tab:'ledger'}}catch(e){return {screen:'trips',tripId:null,tab:'ledger'}}}
 function saveView(){try{localStorage.setItem(KEY+'.view',JSON.stringify(V))}catch(e){}}
 function uid(){return Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4)}
@@ -411,12 +412,26 @@ function settleText(t){ const {net,transfers}=settle(t); const lines=[`[${t.name
 
 /* ====================== 렌더 ====================== */
 function render(){
-  if(V.screen==='trip'&&!getTrip(V.tripId)){V.screen='trips';V.tripId=null}
-  saveView();
   const app=document.getElementById('app');
-  app.innerHTML=V.screen==='trip'?viewTrip(getTrip(V.tripId)):viewTrips();
-  window.scrollTo(0,0);
+  if(S&&S._broken){ app.innerHTML=rescueView(LOAD_ERROR); return }
+  try{
+    if(V.screen==='trip'&&!getTrip(V.tripId)){V.screen='trips';V.tripId=null}
+    saveView();
+    app.innerHTML=V.screen==='trip'?viewTrip(getTrip(V.tripId)):viewTrips();
+    window.scrollTo(0,0);
+  }catch(err){
+    // 어떤 화면에서 문제가 나도 기록은 그대로 두고, 목록 화면으로 돌아가거나 백업을 복사할 수 있게 한다
+    if(V.screen!=='trips'){ V={screen:'trips',tripId:null,tab:'ledger'}; try{saveView()}catch(e){} try{ app.innerHTML=viewTrips(); toast('화면을 그리다 문제가 생겨 목록으로 돌아왔어요'); return }catch(e2){} }
+    app.innerHTML=rescueView('화면을 그리지 못했어요: '+(err&&err.message||err));
+  }
 }
+function rescueView(msg){ let raw=RAW_BACKUP; if(!raw){ try{ raw=localStorage.getItem(KEY)||'' }catch(e){} } const broken=[]; try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.startsWith(KEY+'.broken.'))broken.push(k) } }catch(e){}
+  return `<div class="topbar"><h1>여행 가계부</h1></div><div class="page"><div class="notice" style="margin:0 0 12px">${esc(msg||'문제가 생겼어요')}</div>
+  <div class="small muted" style="margin-bottom:10px">기록은 지우지 않았어요. 아래 내용을 전체 복사해서 메모 앱에 붙여 두면 안전해요. 그 다음 이 화면을 캡처해서 알려주세요.</div>
+  <textarea class="input mono small" id="rescueBox" readonly rows="8">${esc(raw||broken.map(k=>{try{return localStorage.getItem(k)}catch(e){return ''}}).join('\n')||'(저장된 내용이 없어요)')}</textarea>
+  <div class="inline" style="margin-top:8px"><button class="btn sm" id="rescueCopy">전체 복사</button><button class="btn sm ghost" id="rescueRetry">다시 열기</button></div>
+  <div class="small muted" style="margin-top:10px">페이지 주소: ${esc(location.href)}<br>브라우저: ${esc(navigator.userAgent)}</div></div>`; }
+document.addEventListener('click',ev=>{ if(ev.target.id==='rescueCopy'){ const box=document.getElementById('rescueBox'); const txt=box.value; (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>toast('복사했어요')).catch(()=>{box.select();try{document.execCommand('copy');toast('복사했어요')}catch(e){toast('길게 눌러 직접 복사해 주세요')}}) } if(ev.target.id==='rescueRetry'){ location.reload() } });
 function viewTrips(){
   const trips=[...S.trips].sort((a,b)=>(b.start||'').localeCompare(a.start||''));
   const live=trips.filter(t=>tripStatus(t)!=='past'), past=trips.filter(t=>tripStatus(t)==='past');
@@ -791,6 +806,7 @@ const ACTIONS={
 function armed(el,fn,msg){ if(el.dataset.armed){fn();return} el.dataset.armed='1'; const old=el.textContent; el.textContent='정말 삭제'; toast(msg||'한 번 더 누르면 지워요'); setTimeout(()=>{delete el.dataset.armed; if(el.isConnected)el.textContent=old},3000) }
 document.addEventListener('click',ev=>{const el=ev.target.closest('[data-act]'); if(!el)return; const fn=ACTIONS[el.dataset.act]; if(fn)fn(el.dataset,el,ev)});
 
+window.addEventListener('error',ev=>{ try{ const app=document.getElementById('app'); if(app&&!app.innerHTML.trim()) app.innerHTML=rescueView('시작하다 문제가 생겼어요: '+(ev.message||'')) }catch(e){} });
 applyTheme(); render();
 if('serviceWorker' in navigator){ try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){} }
 </script>
