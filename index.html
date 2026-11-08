@@ -322,8 +322,9 @@ function migrate(d){
       delete t.memberIds; delete t.cardIds }
     delete d.settings.members; delete d.settings.categories; d.version=2 }
   for(const c of d.settings.cards||[]) if(!c.kind)c.kind='debit';
+  for(const t of d.trips||[]) for(const e of t.expenses||[]) if(e.rateManual===undefined){ const card=(d.settings.cards||[]).find(x=>e.pm&&e.pm.type==='card'&&x.id===e.pm.id); e.rateManual=!!(card&&card.kind==='credit'&&+e.rate>0&&!e.provisional) }
   return d }
-function save(){ if(S&&S._broken){ toast('기록을 읽지 못한 상태라 저장하지 않아요'); return } try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('저장하지 못했어요. 저장 공간을 확인해 주세요')}}
+function save(){ if(S&&S._broken){ toast('기록을 읽지 못한 상태라 저장하지 않아요'); return } try{ for(const t of S.trips||[]) refreshRates(t) }catch(e){} try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('저장하지 못했어요. 저장 공간을 확인해 주세요')}}
 function loadView(){try{return JSON.parse(localStorage.getItem(KEY+'.view'))||{screen:'trips',tripId:null,tab:'ledger'}}catch(e){return {screen:'trips',tripId:null,tab:'ledger'}}}
 function saveView(){try{localStorage.setItem(KEY+'.view',JSON.stringify(V))}catch(e){}}
 function uid(){return Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4)}
@@ -342,7 +343,9 @@ const memberName=(t,id)=>((t.members||[]).find(m=>m.id===id)||{}).name||'?';
 const cardName=id=>(S.settings.cards.find(c=>c.id===id)||{}).name||'(삭제된 카드)';
 const cardKind=id=>(S.settings.cards.find(c=>c.id===id)||{}).kind||'debit';
 const isCredit=pm=>!!pm&&pm.type==='card'&&cardKind(pm.id)==='credit';
-function refreshProvisional(t){ for(const e of t.expenses) if(e.provisional){ const r=defaultRate(t,e.cur,e.pm,e.date); if(r>0)e.rate=r } }
+// 직접 입력하지 않은 환율은 언제나 '지출 날짜까지의 기록' 기준으로 다시 계산한다. 기록을 늦게 적거나 고쳐도 지출이 옛 값에 묶이지 않는다
+function refreshRates(t){ for(const e of t.expenses||[]){ if(e.cur==='KRW'){ e.rate=1; continue } if(e.rateManual)continue; const r=defaultRate(t,e.cur,e.pm,e.date); if(r>0){ e.rate=r } e.provisional=isCredit(e.pm) } }
+function refreshProvisional(t){ refreshRates(t) }
 const provisionalCount=t=>t.expenses.filter(e=>e.provisional&&+e.rate>0).length;
 const topupCards=()=>S.settings.cards.filter(c=>c.kind!=='credit');
 // 계좌: 같은 계좌 이름을 적은 체크카드끼리 충전 잔액을 공유한다. 계좌 이름이 없으면 카드 자체가 하나의 계좌
@@ -360,7 +363,12 @@ function walletEvents(t,w){ const ev=[];
     else { if(c.wallet==='card')continue; const a=Math.abs(+c.amount||0); const sg=c.type==='adjust'?Math.sign(+c.amount||0):(CASH_SIGN[c.type]||1); if(sg>0){ let krw=+c.krw||0; if(c.type==='receive'&&+c.rate>0)krw=a*(+c.rate); ev.push({d:c.date,o:0,amt:a,krw}) } else if(sg<0) ev.push({d:c.date,o:1,amt:-a}) } }
   for(const e of t.expenses){ if(e.cur!==w.cur||!e.pm)continue; if((w.kind==='card'&&e.pm.type==='card'&&acctKey(e.pm.id)===w.key)||(w.kind==='cash'&&e.pm.type==='cash'&&e.pm.id===w.cur)) ev.push({d:e.date,o:2,tm:e.time||'',amt:-(+e.amount||0)}) }
   return ev.sort((a,b)=>(a.d||'').localeCompare(b.d||'')||a.o-b.o||(a.tm||'').localeCompare(b.tm||'')) }
-function walletState(t,w,upTo){ let bal=0,avg=0; for(const e of walletEvents(t,w)){ if(upTo&&e.d&&e.d>upTo)break; if(e.amt>0&&e.krw>0){ const base=Math.max(bal,0); avg=avg>0?(base*avg+e.krw)/(base+e.amt):e.krw/e.amt } bal+=e.amt } return {bal,avg} }
+function walletState(t,w,upTo){ let bal=0,avg=0; for(const e of walletEvents(t,w)){ if(upTo&&e.d&&e.d>upTo)break;
+  if(e.amt>0&&e.krw>0){ const r=e.krw/e.amt; const base=Math.max(bal,0);
+    if(avg>0&&(r<avg/3||r>avg*3)){ /* 기존 환율과 3배 넘게 차이 나는 입금은 입력 실수(환급·보증금 등)로 보고 환율에 반영하지 않는다 */ }
+    else if(avg>0&&base>0) avg=(base*avg+e.krw)/(base+e.amt);
+    else avg=r }
+  bal+=e.amt } return {bal,avg} }
 function cardAvgRate(t,key,cur,upTo){ return walletState(t,{kind:'card',key,cur},upTo).avg }
 function cardWallets(t){ const m=new Map(); for(const a of accounts()) for(const c of (t.currencies||[])) if(c.code!=='KRW') m.set(a.id+'|'+c.code,{key:a.id,cur:c.code}); for(const c of t.cash) if(c.wallet==='card'){ const k=txAcct(c); if(k) m.set(k+'|'+c.cur,{key:k,cur:c.cur}) } return [...m.values()] }
 const noRateCount=t=>t.expenses.filter(e=>e.cur!=='KRW'&&!(+e.rate>0)).length;
@@ -570,7 +578,7 @@ function expenseForm(t,e){
   const body=`
   ${field('금액',`<div class="inline"><input class="input big money" name="amount" type="text" inputmode="decimal" placeholder="0" value="${esc(fmtInput(e.amount))}" required autofocus></div>`,`<span id="krwPreview"></span>`)}
   ${field('통화',chipgroup('cur',curs.map(c=>({id:c,label:`<span class="code">${c}</span>`})),e.cur))}
-  <div class="field" id="rateField" hidden><label id="rateLabel">환율</label><div class="inline"><span class="fixed small muted num"><span id="rateUnit">${unitOf(e.cur)}</span> <span id="rateCur">${esc(e.cur)}</span> =</span><input class="input mono" name="rate" type="number" inputmode="decimal" step="any" min="0" placeholder="원" value="${esc(e.provisional?'':(rate0?toDisp(e.cur,rate0):''))}"><span class="fixed small muted">원</span></div><div class="hint" id="rateHint"></div></div>
+  <div class="field" id="rateField" hidden><label id="rateLabel">환율</label><div class="inline"><span class="fixed small muted num"><span id="rateUnit">${unitOf(e.cur)}</span> <span id="rateCur">${esc(e.cur)}</span> =</span><input class="input mono" name="rate" type="number" inputmode="decimal" step="any" min="0" placeholder="원" value="${esc(!isNew&&e.rateManual&&+e.rate>0?toDisp(e.cur,e.rate):'')}"><span class="fixed small muted">원</span></div><div class="hint" id="rateHint"></div></div>
   ${field('결제수단',chipgroup('pm',pmItems,e.pm.type+':'+e.pm.id,{cls:it=>it.kind}))}
   ${field('누가 냈나',chipgroup('payer',members,e.payer))}
   ${field('누구랑 나누나',chipgroup('split',members,e.split||[],{multi:true})+`<div class="inline" style="margin-top:8px"><label class="small muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="custom" ${e.splitMode==='custom'?'checked':''}> 금액 직접 나누기</label></div><div class="sharelist ${e.splitMode==='custom'?'':'hide'}" id="shares"></div>`)}
@@ -584,9 +592,10 @@ function expenseForm(t,e){
     const [ptype,pid]=pmv.split(/:(.+)/); const payer=groupValue(f,'payer'); const split=groupValue(f,'split'); if(!split.length){toast('나눌 사람을 1명 이상 골라 주세요');return false}
     const custom=f.custom.checked; const shares={}; if(custom){ for(const m of split){ const inp=f.querySelector(`[name="share_${m}"]`); shares[m]=inp?num(inp.value):0 } }
     const credit=isCredit({type:ptype,id:pid}); const auto=cur==='KRW'?1:defaultRate(t,cur,{type:ptype,id:pid},f.date.value||today()); let rate=fromDisp(cur,f.rate.value); let provisional=false;
-    if(cur!=='KRW'&&!(rate>0)){ rate=auto>0?auto:0; provisional=true }
+    const rateManual=cur!=='KRW'&&!f.querySelector('#rateField').hidden&&rate>0;
+    if(cur!=='KRW'&&!(rate>0)){ rate=auto>0?auto:0; provisional=credit }
     const tc=(t.currencies||[]).find(c=>c.code===cur); if(tc&&!(tc.rate>0)&&!(walletAvgRateRaw(t,cur)>0)&&!provisional) tc.rate=rate;
-    const obj={id:e.id||uid(),date:f.date.value||today(),time:f.time.value,amount,cur,rate:cur==='KRW'?1:rate,provisional,cat:groupValue(f,'cat'),sub:groupValue(f,'sub')||null,memo:f.memo.value.trim(),pm:{type:ptype,id:pid},payer,split,splitMode:custom?'custom':'equal',shares};
+    const obj={id:e.id||uid(),date:f.date.value||today(),time:f.time.value,amount,cur,rate:cur==='KRW'?1:rate,rateManual,provisional,cat:groupValue(f,'cat'),sub:groupValue(f,'sub')||null,memo:f.memo.value.trim(),pm:{type:ptype,id:pid},payer,split,splitMode:custom?'custom':'equal',shares};
     if(isNew)t.expenses.push(obj); else Object.assign(t.expenses.find(x=>x.id===e.id),obj);
     t.last={cur,cat:obj.cat,sub:obj.sub,pm:obj.pm,payer,split}; save(); render(); toast(isNew?'기록했어요':'수정했어요');
   },extra:isNew?'':`<button type="button" class="btn danger" data-act="delete-expense" data-id="${e.id}">삭제</button>`});
@@ -595,13 +604,13 @@ function expenseForm(t,e){
   const subField=form.querySelector('#subField'), subChips=form.querySelector('#subChips');
   const renderSub=()=>{ const catId=groupValue(form,'cat'); const c=cats.find(x=>x.id===catId); const subs=(c&&c.subs)||[]; if(!subs.length){subField.hidden=true;subChips.innerHTML='';return} subField.hidden=false; const prev=groupValue(form,'sub'); const cur=prev!==null&&subs.some(x=>x.id===prev)?prev:(e.cat===catId&&e.sub&&subs.some(x=>x.id===e.sub))?e.sub:(isNew&&last.cat===catId&&subs.some(x=>x.id===last.sub))?last.sub:''; subChips.innerHTML=chipgroup('sub',[{id:'',label:'구분 없음'},...subs.map(x=>({id:x.id,label:esc(x.name)}))],cur) };
   renderSub();
-  const refresh=()=>{const cur=groupValue(form,'cur'); form.querySelector('#rateCur').textContent=cur; form.querySelector('#rateUnit').textContent=unitOf(cur); const pm=parsePm(groupValue(form,'pm')); const credit=isCredit(pm); const auto=cur==='KRW'?1:defaultRate(t,cur,pm,form.date.value||today()); const manual=cur!=='KRW'&&!(auto>0); const show=cur!=='KRW'&&(manual||credit); rateField.hidden=!show;
-    const r=fromDisp(cur,rateEl.value); const amt=num(amountEl.value); const srcName=(pm&&pm.type==='card'&&isTopup(pm.id)&&cardAvgRate(t,acctKey(pm.id),cur)>0)?'충전 환율':walletAvgRateRaw(t,cur)>0?'환전 환율':'적어 둔 환율'; const multi=(pm&&pm.type==='card'&&isTopup(pm.id))?t.cash.filter(c=>c.wallet==='card'&&txAcct(c)===acctKey(pm.id)&&c.cur===cur&&c.type==='topup').length>1:t.cash.filter(c=>c.cur===cur&&c.wallet!=='card'&&['exchange','atm'].includes(c.type)).length>1;
-    if(show){ if(credit){ rateLabel.textContent='카드 환율 (명세서 확인 후)'; rateEl.placeholder=auto>0?'비워 두면 임시 '+toDisp(cur,auto):'원'; rateHint.textContent=auto>0?`지금 모르면 비워 두세요. ${srcName}로 임시 계산하고 "환율 미확정"으로 표시해요. 명세서에 나온 환율(${unitOf(cur)} ${cur} 기준 원화)을 나중에 이 건에 넣으면 확정돼요.`:'지금 몰라도 돼요. 비워 두면 환전을 적을 때 자동으로 채워지고, 명세서 보고 확정하면 돼요.' } else { rateLabel.textContent='환율 (선택)'; rateEl.placeholder='비워도 돼요'; rateHint.textContent=`네이버에서 ${cur} 환율을 검색하면 나오는 "${unitOf(cur)} ${cur} = ○○원"의 ○○를 그대로 적으면 돼요. 비워 두면 환전을 적을 때 자동으로 채워져요.` } }
-    let text=''; if(cur!=='KRW'){ if(credit&&!(r>0)&&auto>0) text=`임시 ${srcName} ${fmtRate(cur,auto)} → 약 ${fmtKRW(amt*auto)} (미확정)`; else if(r>0) text=`${credit?'카드 환율':manual?'':srcName}${!credit&&!manual&&multi?'(이 날짜 잔액 기준)':''} ${fmtRate(cur,r)} → ${fmtKRW(Math.round(amt*r))}`.trim(); else text='환율 미정 · 환전을 적으면 원화로 계산돼요' } preview.textContent=text; renderShares()};
+  const refresh=()=>{const cur=groupValue(form,'cur'); form.querySelector('#rateCur').textContent=cur; form.querySelector('#rateUnit').textContent=unitOf(cur); const pm=parsePm(groupValue(form,'pm')); const credit=isCredit(pm); const auto=cur==='KRW'?1:defaultRate(t,cur,pm,form.date.value||today()); const manual=cur!=='KRW'&&!(auto>0); const wasManual=!isNew&&!!e.rateManual; const show=cur!=='KRW'&&(manual||credit||wasManual); rateField.hidden=!show;
+    const typed=fromDisp(cur,rateEl.value); const r=typed>0?typed:(show?0:auto); const amt=num(amountEl.value); const srcName=(pm&&pm.type==='card'&&isTopup(pm.id)&&cardAvgRate(t,acctKey(pm.id),cur)>0)?'충전 환율':walletAvgRateRaw(t,cur)>0?'환전 환율':'적어 둔 환율'; const multi=(pm&&pm.type==='card'&&isTopup(pm.id))?t.cash.filter(c=>c.wallet==='card'&&txAcct(c)===acctKey(pm.id)&&c.cur===cur&&c.type==='topup').length>1:t.cash.filter(c=>c.cur===cur&&c.wallet!=='card'&&['exchange','atm'].includes(c.type)).length>1;
+    if(show){ if(credit){ rateLabel.textContent='카드 환율 (명세서 확인 후)'; rateEl.placeholder=auto>0?'비워 두면 임시 '+toDisp(cur,auto):'원'; rateHint.textContent=auto>0?`지금 모르면 비워 두세요. ${srcName}로 임시 계산하고 "환율 미확정"으로 표시해요. 명세서에 나온 환율(${unitOf(cur)} ${cur} 기준 원화)을 나중에 이 건에 넣으면 확정돼요.`:'지금 몰라도 돼요. 비워 두면 환전을 적을 때 자동으로 채워지고, 명세서 보고 확정하면 돼요.' } else if(wasManual&&!manual){ rateLabel.textContent='환율 (직접 입력)'; rateEl.placeholder=auto>0?'비우면 자동 '+toDisp(cur,auto):'원'; rateHint.textContent='직접 적은 환율이라 자동 갱신에서 빠져 있어요. 비우고 저장하면 다시 자동으로 계산해요.' } else { rateLabel.textContent='환율 (선택)'; rateEl.placeholder='비워도 돼요'; rateHint.textContent=`네이버에서 ${cur} 환율을 검색하면 나오는 "${unitOf(cur)} ${cur} = ○○원"의 ○○를 그대로 적으면 돼요. 비워 두면 환전을 적을 때 자동으로 채워져요.` } }
+    let text=''; if(cur!=='KRW'){ if(!(typed>0)&&auto>0&&(credit||wasManual)) text=`${credit?'임시 ':''}${srcName} ${fmtRate(cur,auto)} → 약 ${fmtKRW(amt*auto)}${credit?' (미확정)':''}`; else if(r>0) text=`${typed>0?'직접 입력':srcName}${typed>0?'':(multi?'(이 날짜 잔액 기준)':'')} ${fmtRate(cur,r)} → ${fmtKRW(Math.round(amt*r))}`.trim(); else text='환율 미정 · 환전을 적으면 원화로 계산돼요' } preview.textContent=text; renderShares()};
   const renderShares=()=>{ if(!form.custom.checked){sharesEl.classList.add('hide');return} sharesEl.classList.remove('hide'); const cur=groupValue(form,'cur'); const split=groupValue(form,'split'); const prev={}; sharesEl.querySelectorAll('input').forEach(i=>prev[i.name]=i.value); sharesEl.innerHTML=split.map(m=>`<div class="inline"><label>${esc(memberName(t,m))}</label><input class="input mono money" name="share_${m}" type="text" inputmode="decimal" placeholder="${cur} 금액" value="${esc(fmtInput(prev['share_'+m]??(e.shares&&e.shares[m])??''))}"></div>`).join('')+`<div class="small muted">비워두면 균등으로 계산해요. 합계가 금액과 달라도 비율로 나눠요.</div>` };
-const fill=c=>{ const pm=parsePm(groupValue(form,'pm')); const d=defaultRate(t,c,pm,form.date.value||today()); rateEl.value=isCredit(pm)?'':(d>0?toDisp(c,d):'') };
-  form.addEventListener('input',ev=>{ if(ev.target===rateEl)rateEl.dataset.touched='1'; if(ev.target.name==='date'&&isNew&&!rateEl.dataset.touched)fill(groupValue(form,'cur')); refresh() });
+const fill=c=>{ if(!rateEl.dataset.touched) rateEl.value='' };
+  form.addEventListener('input',ev=>{ if(ev.target===rateEl)rateEl.dataset.touched='1'; refresh() });
   form.addEventListener('chipchange',ev=>{ const n=ev.detail.name; if(n==='cat'){subChips.innerHTML='';renderSub()} const cur=groupValue(form,'cur'); const pmv=groupValue(form,'pm')||'';
     if(n==='cur'){ if(pmv.startsWith('cash:')&&pmv!=='cash:'+cur) setGroup(form,'pm','cash:'+cur); fill(cur) }
     if(n==='pm'){ if(pmv.startsWith('cash:')){ const c=pmv.slice(5); if(c!==cur)setGroup(form,'cur',c); fill(c) } else fill(cur) }
@@ -681,7 +690,10 @@ function walletDetail(t,kind,key,cur){
   const body=`<div class="summary" style="margin:0"><div><div class="k">현재 잔액</div><div class="v">${fmt(bal,cur)}</div></div><div><div class="k">들어온 돈</div><div class="v">${fmt(inSum,cur)}</div></div><div><div class="k">나간 돈</div><div class="v">${fmt(outSum,cur)}</div></div></div>
   <div class="small muted">${r>0?(isCard?'잔액 환율 ':'잔액 환율 ')+fmtRate(cur,r)+' · 현재 잔액은 원화로 약 '+fmtKRW(bal*r):'환율 기록이 아직 없어요'} · 줄을 누르면 그 기록을 고칠 수 있어요</div>
   <div>${ev.length?ev.slice().reverse().map(x=>`<button type="button" class="wrow" data-act="${x.act}" data-id="${x.id}"><span class="l">${esc(x.label)}</span><span class="a ${x.amt>0?'plus':''}">${x.amt>0?'+':'−'}${fmt(Math.abs(x.amt),cur)}</span><span class="m">${fmtDate(x.d)}${x.tm?' '+esc(x.tm):''}${x.sub?' · '+esc(x.sub):''}</span><span class="b">잔액 ${fmt(x.bal,cur)}</span></button>`).join(''):'<div class="empty">아직 기록이 없어요</div>'}</div>`;
-  openSheet(title,body,{submitLabel:'닫기'});
+  const form=openSheet(title,body+`<div class="field"><button type="button" class="btn ghost block" data-recalc="1">직접 입력한 환율 모두 자동으로 되돌리기</button><div class="hint">자동 환율 지출은 기록이 바뀔 때마다 알아서 다시 계산돼요. 이 버튼은 이 지갑으로 쓴 지출 중 환율을 직접 적은 건까지 전부 자동으로 되돌려요.</div></div>`,{submitLabel:'닫기'});
+  form.querySelector('[data-recalc]').addEventListener('click',ev=>{ const b=ev.currentTarget; if(!b.dataset.armed){ b.dataset.armed='1'; b.textContent='한 번 더 누르면 다시 계산해요'; return }
+    let n=0; for(const e of t.expenses){ if(e.cur!==cur||!e.pm||e.cur==='KRW')continue; const hit=isCard?(e.pm.type==='card'&&acctKey(e.pm.id)===key):(e.pm.type==='cash'&&e.pm.id===cur); if(!hit)continue; if(e.rateManual){ e.rateManual=false; n++ } }
+    save(); closeSheet(); render(); toast(n?`${n}건을 자동 환율로 되돌렸어요`:'직접 입력한 환율이 없어요'); walletDetail(t,kind,key,cur) });
 }
 
 /* ---------- 이월 ---------- */
