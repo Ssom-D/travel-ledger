@@ -459,7 +459,7 @@ function viewTrip(t){
   const tabs=[['ledger','지출',I.tabLedger],['cash','현금',I.tabCash],['settle','정산',I.tabSettle],['stats','통계',I.tabStats]];
   const body=tab==='cash'?viewCash(t):tab==='settle'?viewSettle(t):tab==='stats'?viewStats(t):viewLedger(t);
   const fab=tab==='ledger'?`<button class="fab" data-act="new-expense" title="지출 추가">${I.plus}</button>`:tab==='cash'?`<button class="fab" data-act="new-cash" title="현금 기록 추가">${I.plus}</button>`:'';
-  return `<div class="topbar"><button class="iconbtn" data-act="go-trips">${I.back}</button><div style="flex:1;min-width:0"><h1>${esc(t.name)}</h1><div class="sub">${fmtRange(t.start,t.end)}${tripStatus(t)==='past'?' · 지난 여행':''}</div></div><button class="iconbtn" data-act="edit-trip" title="여행 설정">${I.edit}</button></div>
+  return `<div class="topbar"><button class="iconbtn" data-act="go-trips">${I.back}</button><div style="flex:1;min-width:0"><h1>${esc(t.name)}</h1><div class="sub">${fmtRange(t.start,t.end)}${tripStatus(t)==='past'?' · 지난 여행':''}</div></div><button class="iconbtn" data-act="backup-trip" data-id="${t.id}" title="이 여행 백업">${I.save}</button><button class="iconbtn" data-act="edit-trip" title="여행 설정">${I.edit}</button></div>
   ${t.isSample?`<div class="notice">이 여행은 예시 데이터예요. 살펴본 뒤 <button data-act="delete-trip" data-id="${t.id}">삭제</button>하고 진짜 여행을 만들어 보세요.</div>`:''}
   ${body}${fab}
   <nav class="tabs"><div>${tabs.map(([k,l,ic])=>`<button class="tab ${tab===k?'active':''}" data-act="tab" data-tab="${k}">${ic}<span>${l}</span></button>`).join('')}</div></nav>`;
@@ -809,16 +809,16 @@ function settingsSheet(){
 function applyTheme(){ const v=(()=>{try{return localStorage.getItem(KEY+'.theme')||''}catch(e){return ''}})(); if(v)document.documentElement.dataset.theme=v; else delete document.documentElement.dataset.theme }
 
 /* ---------- 백업 ---------- */
-function backupSheet(){
-  const json=JSON.stringify(S);
-  const fname=`여행가계부-${today()}.json`;
-  const body=`<div class="small muted">데이터는 이 폰의 브라우저 안에만 있어요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니, 여행이 끝날 때마다 백업해 두세요. 폰에서는 "파일로 공유"가 제일 편해요. AirDrop이나 카카오톡, iCloud Drive로 보낼 수 있어요.</div>
-  ${field('내보내기',`<div class="inline"><button type="button" class="btn sm primary" id="shareBtn">파일로 공유</button><button type="button" class="btn sm" id="copyBtn">전체 복사</button><button type="button" class="btn sm ghost" id="dlBtn">파일로 저장</button></div><textarea class="input mono small" id="exportBox" readonly rows="3" style="margin-top:8px">${esc(json)}</textarea>`,`${S.trips.length}개 여행 · ${Math.round(json.length/1024)}KB · ${esc(fname)}`)}
+function backupSheet(trip){
+  const json=JSON.stringify(trip?{version:S.version||2,settings:{cards:S.settings.cards},trips:[trip]}:S);
+  const fname=trip?`여행가계부-${String(trip.name||'여행').replace(/[\\/:*?"<>|]/g,'')}-${today()}.json`:`여행가계부-${today()}.json`;
+  const body=`<div class="small muted">${trip?`"${esc(trip.name)}" 여행 하나만 담은 백업이에요. 카드 목록도 같이 들어가서 다른 폰에서 "여행 합치기"로 바로 넣을 수 있어요.`:'데이터는 이 폰의 브라우저 안에만 있어요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니, 여행이 끝날 때마다 백업해 두세요.'} 폰에서는 "파일로 공유"가 제일 편해요. AirDrop이나 카카오톡, iCloud Drive로 보낼 수 있어요.</div>
+  ${field('내보내기',`<div class="inline"><button type="button" class="btn sm primary" id="shareBtn">파일로 공유</button><button type="button" class="btn sm" id="copyBtn">전체 복사</button><button type="button" class="btn sm ghost" id="dlBtn">파일로 저장</button></div><textarea class="input mono small" id="exportBox" readonly rows="3" style="margin-top:8px">${esc(json)}</textarea>`,`${trip?'1개 여행':S.trips.length+'개 여행'} · ${Math.round(json.length/1024)}KB · ${esc(fname)}`)}
   ${field('가져오기',`<div class="inline"><label class="btn sm" style="cursor:pointer">파일 불러오기<input type="file" id="importFile" accept=".json,application/json,text/plain" hidden></label></div><textarea class="input mono small" id="importBox" rows="3" placeholder="또는 백업해 둔 내용을 붙여넣기" style="margin-top:8px"></textarea><div class="inline" style="margin-top:8px"><button type="button" class="btn sm" id="mergeBtn">여행 합치기</button><button type="button" class="btn sm danger" id="replaceBtn">전체 덮어쓰기</button></div>`,'파일을 고르거나 붙여넣은 뒤 합치기 또는 덮어쓰기를 눌러요. 합치기는 같은 여행이 있으면 건너뛰고 새 여행만 추가해요')}`;
-  const form=openSheet('백업',body,{submitLabel:'닫기',onSubmit:()=>{}});
+  const form=openSheet(trip?'여행 백업':'백업',body,{submitLabel:'닫기',onSubmit:()=>{}});
   form.querySelector('#copyBtn').addEventListener('click',async()=>{ const box=form.querySelector('#exportBox'); try{await navigator.clipboard.writeText(json);toast('복사했어요')}catch(e){box.select();try{document.execCommand('copy');toast('복사했어요')}catch(e2){toast('길게 눌러 직접 복사해 주세요')}} });
   form.querySelector('#dlBtn').addEventListener('click',()=>{ try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([json],{type:'application/json'}));a.download=fname;a.click();toast('저장을 시작했어요. 안 되면 파일로 공유나 복사를 써 주세요')}catch(e){toast('이 환경에선 파일 저장이 막혀 있어요. 파일로 공유나 복사를 써 주세요')} });
-  form.querySelector('#shareBtn').addEventListener('click',async()=>{ try{ const file=new File([json],fname,{type:'application/json'}); if(navigator.canShare&&navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:'여행 가계부 백업'}); toast('공유 창을 열었어요') } else if(navigator.share){ await navigator.share({title:'여행 가계부 백업',text:json}); toast('텍스트로 공유했어요') } else toast('이 브라우저는 공유를 지원하지 않아요. 복사나 파일 저장을 써 주세요') }catch(e){ if(e&&e.name!=='AbortError')toast('공유하지 못했어요. 복사나 파일 저장을 써 주세요') } });
+  form.querySelector('#shareBtn').addEventListener('click',async()=>{ try{ const file=new File([json],fname,{type:'application/json'}); if(navigator.canShare&&navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:trip?`${trip.name} 백업`:'여행 가계부 백업'}); toast('공유 창을 열었어요') } else if(navigator.share){ await navigator.share({title:'여행 가계부 백업',text:json}); toast('텍스트로 공유했어요') } else toast('이 브라우저는 공유를 지원하지 않아요. 복사나 파일 저장을 써 주세요') }catch(e){ if(e&&e.name!=='AbortError')toast('공유하지 못했어요. 복사나 파일 저장을 써 주세요') } });
   form.querySelector('#importFile').addEventListener('change',ev=>{ const f=ev.target.files&&ev.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ form.querySelector('#importBox').value=String(r.result||''); toast(`${f.name} 읽었어요. 합치기 또는 덮어쓰기를 눌러 주세요`) }; r.onerror=()=>toast('파일을 읽지 못했어요'); r.readAsText(f) });
   const parse=()=>{ try{const d=JSON.parse(form.querySelector('#importBox').value); if(!d||!Array.isArray(d.trips))throw 0; return d}catch(e){toast('형식이 맞지 않아요. 백업한 내용 전체를 붙여넣어 주세요');return null} };
   form.querySelector('#mergeBtn').addEventListener('click',()=>{ const d=parse(); if(!d)return; migrate(d); let n=0; for(const it of (d.settings.cards||[])) if(!S.settings.cards.some(x=>x.id===it.id)) S.settings.cards.push(it); for(const t of d.trips) if(!S.trips.some(x=>x.id===t.id)){S.trips.push(t);n++} save(); closeSheet(); render(); toast(`${n}개 여행을 가져왔어요`) });
@@ -836,6 +836,7 @@ const ACTIONS={
   'edit-trip':()=>tripForm(getTrip(V.tripId)),
   'settings':()=>settingsSheet(),
   'backup':()=>backupSheet(),
+  'backup-trip':d=>backupSheet(getTrip(d.id)),
   'new-expense':()=>expenseForm(getTrip(V.tripId)),
   'edit-expense':d=>{const t=getTrip(V.tripId);expenseForm(t,t.expenses.find(e=>e.id===d.id))},
   'new-cash':d=>cashForm(getTrip(V.tripId),null,{cur:d.cur,type:d.type,acct:d.acct}),
