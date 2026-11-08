@@ -387,15 +387,26 @@ function walletBalance(t,cur){ let b=0; for(const c of t.cash) if(c.cur===cur&&c
 const signedCash=c=>c.type==='adjust'?(+c.amount||0):(CASH_SIGN[c.type]||1)*Math.abs(+c.amount||0);
 function walletAvgRate(t,cur){ if(cur==='KRW')return 1; let a=0,k=0; for(const c of t.cash) if(c.cur===cur&&['exchange','atm','carry_in'].includes(c.type)&&+c.krw>0){a+=Math.abs(+c.amount);k+=+c.krw} return a>0?k/a:tripRate(t,cur) }
 function tripTotal(t){return t.expenses.reduce((s,e)=>s+eKRW(e),0)}
-function eShares(e){ const krw=eKRW(e); const out={}; const split=e.split&&e.split.length?e.split:[e.payer]; if(e.splitMode==='custom'&&e.shares){ let sum=0; for(const m of split){const v=+e.shares[m]||0; sum+=v} for(const m of split){ out[m]=sum>0?Math.round(krw*(+e.shares[m]||0)/sum):Math.round(krw/split.length) } } else { const each=Math.floor(krw/split.length); let rem=krw-each*split.length; for(const m of split){ out[m]=each+(rem>0?1:0); if(rem>0)rem-- } } return out }
+function eShares(e,krwOverride){ const krw=krwOverride!==undefined?krwOverride:eKRW(e); const out={}; const split=e.split&&e.split.length?e.split:[e.payer]; if(e.splitMode==='custom'&&e.shares){ let sum=0; for(const m of split){const v=+e.shares[m]||0; sum+=v} for(const m of split){ out[m]=sum>0?Math.round(krw*(+e.shares[m]||0)/sum):Math.round(krw/split.length) } } else { const each=Math.floor(krw/split.length); let rem=krw-each*split.length; for(const m of split){ out[m]=each+(rem>0?1:0); if(rem>0)rem-- } } return out }
 function myShare(t){ const me=meId(t); return t.expenses.reduce((s,e)=>s+(eShares(e)[me]||0),0) }
 function toast(msg){ const r=document.getElementById('toastRoot'); r.innerHTML=`<div class="toast">${esc(msg)}</div>`; clearTimeout(toast._t); toast._t=setTimeout(()=>r.innerHTML='',2200) }
 function pmLabel(t,pm){ if(!pm)return ''; if(pm.type==='cash')return (pm.id==='KRW'?'원화':pm.id)+' 현금'; return cardName(pm.id) }
 
 /* ====================== 정산 ====================== */
+// 여행 평균 환율: 이 여행에서 그 통화로 '원화를 들여 넣은 돈' 전체의 가중 평균. 카드 잔액에서 옮긴 ATM 인출은 충전 때 이미 원가가 잡혀 제외
+function tripAvgRate(t,cur){ if(cur==='KRW')return 1; const infl=[];
+  for(const c of t.cash||[]){ if(c.cur!==cur)continue; const amt=Math.abs(+c.amount||0); let krw=+c.krw||0;
+    if(c.wallet==='card'){ if(c.type!=='topup')continue } else { if(!['exchange','atm','carry_in','receive'].includes(c.type))continue; if(c.type==='atm'&&+c.fromCard>0&&c.cardId&&isTopup(c.cardId))continue; if(c.type==='receive'&&+c.rate>0)krw=amt*(+c.rate) }
+    if(amt>0&&krw>0)infl.push({amt,krw}) }
+  if(!infl.length)return 0; let A=0,K=0; for(const x of infl){A+=x.amt;K+=x.krw} let avg=K/A;
+  const ok=infl.filter(x=>{const r=x.krw/x.amt; return r>avg/3&&r<avg*3}); if(ok.length){A=0;K=0; for(const x of ok){A+=x.amt;K+=x.krw} avg=K/A} return avg }
+// 정산용 원화: 여행 평균 모드면 자동 환율 지출만 평균으로 바꿔 계산 (직접 입력한 환율은 실제 청구액이므로 그대로)
+function settleKRW(t,e){ if(!t.settleAvg||e.cur==='KRW'||e.rateManual)return eKRW(e); const r=tripAvgRate(t,e.cur); return Math.round((+e.amount||0)*(r>0?r:(+e.rate||0))) }
+function settleTotal(t){ return t.expenses.reduce((s,e)=>s+settleKRW(t,e),0) }
+function settleBasisLines(t){ if(!t.settleAvg)return []; return (t.currencies||[]).filter(c=>c.code!=='KRW').map(c=>{const r=tripAvgRate(t,c.code); return r>0?`${fmtRate(c.code,r)} (여행 평균)`:`${c.code}: 평균을 낼 기록이 없어 날짜별 환율 사용`}) }
 function settle(t){
   const me=meId(t); const net={}; (t.members||[]).forEach(m=>net[m.id]={paid:0,owed:0,transfer:0,net:0});
-  for(const e of t.expenses){ const krw=eKRW(e); if(net[e.payer])net[e.payer].paid+=krw; const sh=eShares(e); for(const m in sh){ if(!net[m])net[m]={paid:0,owed:0,transfer:0,net:0}; net[m].owed+=sh[m] } }
+  for(const e of t.expenses){ const krw=settleKRW(t,e); if(net[e.payer])net[e.payer].paid+=krw; const sh=eShares(e,krw); for(const m in sh){ if(!net[m])net[m]={paid:0,owed:0,transfer:0,net:0}; net[m].owed+=sh[m] } }
   for(const c of t.cash){ if((c.type==='give'||c.type==='receive')&&c.memberId&&net[c.memberId]&&net[me]){ const krw=Math.round(Math.abs(+c.amount)*(+c.rate||walletAvgRate(t,c.cur))); if(c.type==='give'){net[me].transfer+=krw;net[c.memberId].transfer-=krw}else{net[me].transfer-=krw;net[c.memberId].transfer+=krw} } }
   for(const m in net) net[m].net=net[m].paid-net[m].owed+net[m].transfer;
   const cred=Object.entries(net).filter(([,v])=>v.net>0).map(([m,v])=>({m,v:v.net})).sort((a,b)=>b.v-a.v);
@@ -404,7 +415,7 @@ function settle(t){
   while(i<debt.length&&j<cred.length){ const x=Math.min(debt[i].v,cred[j].v); if(x>0)transfers.push({from:debt[i].m,to:cred[j].m,amount:x}); debt[i].v-=x; cred[j].v-=x; if(debt[i].v<=0)i++; if(cred[j].v<=0)j++ }
   return {net,transfers}
 }
-function settleText(t){ const {net,transfers}=settle(t); const lines=[`[${t.name} ${fmtRange(t.start,t.end)} 정산]`,`총 지출 ${fmtKRW(tripTotal(t))}`,'']; for(const m in net)lines.push(`${memberName(t,m)}: 낸 돈 ${fmtKRW(net[m].paid)} / 부담 ${fmtKRW(net[m].owed)}`); lines.push(''); if(!transfers.length)lines.push('정산할 금액이 없어요'); for(const x of transfers)lines.push(`${memberName(t,x.from)} → ${memberName(t,x.to)} ${fmtKRW(x.amount)}`); return lines.join('\n') }
+function settleText(t){ const {net,transfers}=settle(t); const lines=[`[${t.name} ${fmtRange(t.start,t.end)} 정산]`,`총 지출 ${fmtKRW(settleTotal(t))}`,...settleBasisLines(t).map(x=>'환율 '+x),'']; for(const m in net)lines.push(`${memberName(t,m)}: 낸 돈 ${fmtKRW(net[m].paid)} / 부담 ${fmtKRW(net[m].owed)}`); lines.push(''); if(!transfers.length)lines.push('정산할 금액이 없어요'); for(const x of transfers)lines.push(`${memberName(t,x.from)} → ${memberName(t,x.to)} ${fmtKRW(x.amount)}`); return lines.join('\n') }
 
 /* ====================== 렌더 ====================== */
 function render(){
@@ -511,7 +522,10 @@ function viewSettle(t){
   if(ids.length<2&&!transfers.length) return `<div class="empty"><b>혼자 다녀온 여행이에요</b>동행자가 2명 이상일 때 정산이 계산돼요.</div>`;
   const rows=ids.map(m=>`<tr><td>${esc(memberName(t,m))}</td><td>${fmtKRW(net[m].paid)}</td><td>${fmtKRW(net[m].owed)}</td><td class="${net[m].net>0?'pos':net[m].net<0?'neg':''}">${net[m].net>0?'+':''}${fmtKRW(net[m].net)}</td></tr>`).join('');
   const hasTransfer=ids.some(m=>net[m].transfer);
-  return `<div class="settlecard"><div class="hd"><span>사람별 정리</span><span class="small muted">총 ${fmtKRW(tripTotal(t))}</span></div><div class="tblwrap"><table class="tbl"><thead><tr><th>이름</th><th>낸 돈</th><th>부담</th><th>차액</th></tr></thead><tbody>${rows}</tbody></table></div>
+  const basis=settleBasisLines(t);
+  const modeBar=`<div class="chips" style="padding:12px 16px 0"><button class="chip ${t.settleAvg?'':'active'}" data-act="settle-mode" data-mode="date">날짜별 환율</button><button class="chip ${t.settleAvg?'active':''}" data-act="settle-mode" data-mode="avg">여행 평균 환율</button></div>
+  <div class="small muted" style="padding:6px 16px 0">${t.settleAvg?(basis.length?basis.map(esc).join(' · ')+' · 직접 입력한 환율은 그대로':'평균을 낼 기록이 없어요'):'각 지출에 적용된 날짜별 잔액 환율 기준이에요. 동행자에게 한 줄로 설명하려면 여행 평균을 켜 보세요'}</div>`;
+  return `${modeBar}<div class="settlecard"><div class="hd"><span>사람별 정리</span><span class="small muted">총 ${fmtKRW(settleTotal(t))}</span></div><div class="tblwrap"><table class="tbl"><thead><tr><th>이름</th><th>낸 돈</th><th>부담</th><th>차액</th></tr></thead><tbody>${rows}</tbody></table></div>
   ${hasTransfer?'<div class="small muted" style="padding:8px 12px">현금으로 주고받은 금액은 차액에 반영돼 있어요.</div>':''}</div>
   <div class="settlecard"><div class="hd"><span>이렇게 보내면 끝</span><button class="btn sm" data-act="copy-settle">복사</button></div>
   ${transfers.length?transfers.map(x=>`<div class="transfer"><span>${esc(memberName(t,x.from))}</span><span class="arrow">→</span><span class="to">${esc(memberName(t,x.to))}</span><span class="amt">${fmtKRW(x.amount)}</span></div>`).join(''):'<div class="empty" style="margin:20px">정산할 금액이 없어요</div>'}</div>
@@ -817,6 +831,7 @@ const ACTIONS={
   'go-trips':()=>{V={screen:'trips',tripId:null,tab:'ledger'};render()},
   'tab':d=>{V.tab=d.tab;render()},
   'filter':d=>{V.filter=d.filter;render()},
+  'settle-mode':d=>{const t=getTrip(V.tripId); t.settleAvg=d.mode==='avg'; save(); render()},
   'new-trip':()=>tripForm(),
   'edit-trip':()=>tripForm(getTrip(V.tripId)),
   'settings':()=>settingsSheet(),
