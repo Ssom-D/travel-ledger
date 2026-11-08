@@ -836,6 +836,8 @@ function armed(el,fn,msg){ if(el.dataset.armed){fn();return} el.dataset.armed='1
 document.addEventListener('click',ev=>{const el=ev.target.closest('[data-act]'); if(!el)return; const fn=ACTIONS[el.dataset.act]; if(fn)fn(el.dataset,el,ev)});
 
 window.addEventListener('error',ev=>{ try{ const app=document.getElementById('app'); if(app&&!app.innerHTML.trim()) app.innerHTML=rescueView('시작하다 문제가 생겼어요: '+(ev.message||'')) }catch(e){} });
+// 앱을 열 때도 자동 환율을 현재 기록 기준으로 맞춘다 (파일을 새로 올린 직후, 저장 전에도 바로 반영되게)
+try{ if(S&&!S._broken&&S.trips&&S.trips.length){ const before=JSON.stringify(S.trips.map(t=>t.expenses.map(e=>e.rate))); for(const t of S.trips) refreshRates(t); if(before!==JSON.stringify(S.trips.map(t=>t.expenses.map(e=>e.rate)))) save() } }catch(e){}
 applyTheme(); render();
 if('serviceWorker' in navigator){ try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){} }
 </script>
